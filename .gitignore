@@ -1,0 +1,14 @@
+# Node.js
+node_modules/
+.env
+dist/
+build/
+
+# OS
+.DS_Store
+
+# Client and server
+client/node_modules/
+client/.env
+server/node_modules/
+server/.env
