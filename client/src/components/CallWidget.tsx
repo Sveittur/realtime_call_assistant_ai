@@ -2,13 +2,19 @@
 import { useEffect, useRef, useState } from "react";
 import TTSPlayer from "./TTSPlayer";
 import PCMPlayer from "./rawTTSPlayer";
+import VoiceCapture, { VoiceCaptureHandle } from "./VoiceCapture";
+import { PCMPlayerHandle } from "./rawTTSPlayer";
+
 export default function CallWidget() {
   const [messages, setMessages] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [audioChunk, setAudioChunk] = useState<string | null>(null);
   const [pcmChunk, setPCMChunk] = useState<string | null>(null);
+  const pcmPlayerRef = useRef<PCMPlayerHandle>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const voiceCaptureRef = useRef<VoiceCaptureHandle>(null);
+
   const [callStarted, setCallStarted] = useState(false);
 
   useEffect(() => {
@@ -53,19 +59,28 @@ export default function CallWidget() {
   const startCall = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const systemPrompt = {
-      type: "response.create",
-      response: {
-        modalities: ["text", "audio"],
-        instructions: "You are a friendly AI call assistant. Start by greeting the user casually.",
-        conversation: "auto",
-        voice: "shimmer",
-      },
-    };
+    wsRef.current.send(JSON.stringify({ type: "start_call" }));
 
-    wsRef.current.send(JSON.stringify(systemPrompt));
+    voiceCaptureRef.current?.start();
     setCallStarted(true);
   };
+
+  const endCall = () => {
+  // Stop capturing user voice
+  voiceCaptureRef.current?.stop();
+
+  // Stop any AI audio playback
+  pcmPlayerRef.current?.stop();
+
+  // Close the WebSocket
+  wsRef.current?.close();
+  wsRef.current = null;
+  setMessages([]);
+
+  setCallStarted(false);
+};
+
+
 
   const sendMessage = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -103,14 +118,30 @@ export default function CallWidget() {
     <div className="p-4 border rounded-lg max-w-md mx-auto">
       <h2 className="text-lg font-bold mb-2">Call Assistant</h2>
 
-      {!callStarted && (
-        <button
-          onClick={startCall}
-          className="mb-4 rounded bg-blue-500 px-4 py-2 text-white"
-        >
-          Start Call
-        </button>
-      )}
+      <div>
+        {!callStarted ? (
+          <button onClick={startCall}>Start Call</button>
+        ) : (
+          <button onClick={endCall}>End Call</button>
+        )}
+
+        <PCMPlayer
+          ref={pcmPlayerRef}
+          audioChunk={pcmChunk}
+          sampleRate={16000}
+          playbackRate={1.6}
+        />
+
+        <VoiceCapture
+          wsRef={wsRef}
+          ref={voiceCaptureRef}
+          onUserSpeaking={() => {
+            wsRef.current?.send(JSON.stringify({ type: "response.cancel" }));
+            pcmPlayerRef.current?.stop(); 
+          }}
+        />
+
+    </div>
 
       <div className="space-y-2 h-64 overflow-y-auto border p-2 rounded mb-2">
         {messages.map((msg, i) => (
@@ -120,7 +151,7 @@ export default function CallWidget() {
         ))}
       </div>
 
-      {callStarted && (
+      {/* {callStarted && (
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
             type="text"
@@ -133,9 +164,8 @@ export default function CallWidget() {
             Send
           </button>
         </form>
-      )}
+      )} */}
 
-      <PCMPlayer audioChunk={pcmChunk} sampleRate={16000} />
     </div>
   );
 }
