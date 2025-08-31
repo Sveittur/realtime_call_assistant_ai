@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.12.2",
+    "@prisma/client": "^6.15.0",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "ws": "^8.18.3"
@@ -22,6 +23,7 @@
     "@types/node-fetch": "^2.6.13",
     "@types/ws": "^8.18.1",
     "nodemon": "^3.1.10",
+    "prisma": "^6.15.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   }

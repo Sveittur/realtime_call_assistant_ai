@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { createPCMProcessor } from "./services/pcm_processing_service";
+import { getAvailability, getEmployees, getEmployeeServices } from "./services/fcstudio_api";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const processor = createPCMProcessor();
@@ -29,16 +30,33 @@ export function setupRealtimeProxy(wss: WebSocket.Server) {
             {
               type: 'function',
               name: "getAvailableSlots",
-              description: "Fetches and returns available slots for a given date, service and employee",
+              description: "Fetches and returns available slots for a given date, serviceId and employeeId",
               parameters: {
                 type: "object",
                 properties: {
                   date: { type: "string", description: "Date string e.g. 2025-04-22" },
-                  service: { type: "string",  enum: ["Herraklipping", "Hárlitun og herraklipping", "Herraklipping og skeggsnyrting"] },
-                  employee: { type: "string", enum: ["Slakurbarber", "Veigar", "Geiri Rakari"]  }
+                  serviceId: { type: "number", description: "An integer id representing an employee service"},
+                  employeeId: { type: "number", description: "An integer id represeting an employee"}
 
                 },
-                required: ["date", "service", "barber"]
+                required: ["date", "serviceId", "employeeId"]
+              }
+            },
+             {
+              type: 'function',
+              name: "getEmployees",
+              description: "Fetches and returns all employees",
+            },
+            {
+              type: 'function',
+              name: "getEmployeeServices",
+              description: "Fetches and returns all employee services for a given employee",
+              parameters: {
+                type: "object",
+                properties: {
+                  employeeId: { type: "number", description: "An integer like 1, 2, 3, never float" },
+                },
+                required: ["employeeId"]
               }
             },
             {
@@ -49,20 +67,20 @@ export function setupRealtimeProxy(wss: WebSocket.Server) {
                 type: "object",
                 properties: {
                   startTime: { type: "string", description: "ISO datetime string e.g. 2025-04-22T11:30:00" },
-                  service: { type: "string", enum: ["Herraklipping", "Hárlitun og herraklipping", "Herraklipping og skeggsnyrting"] },
-                  employee: { type: "string", enum: ["Slakurbarber", "Veigar", "Geiri Rakari"] },
+                  serviceId: { type: "number", description: "An integer id representing an employee service"},
+                  employeeId: { type: "number", description: "An integer id representing an employee like 1, 2, 3, never float" },
                   customer: {
                     type: "object",
                     properties: {
                       name: { type: "string" },
                       email: { type: "string", format: "email" },
                       phoneNumber: { type: "string", minLength: 7, maxLength: 7 },
-                      ssn: { type: "string" }
+                      ssn: { type: "string", minLength: 10, maxLength:10 }
                     },
                     required: ["name", "phoneNumber", "email", "ssn"]
                   }
                 },
-                required: ["startTime", "service", "employee", "customer"]
+                required: ["startTime", "serviceId", "employeeId", "customer"]
               }
             }
           ],
@@ -93,15 +111,54 @@ export function setupRealtimeProxy(wss: WebSocket.Server) {
         const call_id = item.call_id;
         const args = JSON.parse(item.arguments);
 
+        if (name === "getEmployees") {
+          console.log("📞 AI requested employees:", args);
+
+          const result = await getEmployees()
+
+          // Send result back as function_call_output
+          openAiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id,
+              output: JSON.stringify(result)
+            }
+          }));
+
+          // Trigger GPT to respond using this result
+          openAiWs.send(JSON.stringify({ type: "response.create" }));
+        }
+
+        if (name === "getEmployeeServices") {
+          console.log("📞 AI requested employee services:", args);
+
+          const result = await getEmployeeServices(args.employeeId);
+
+          // Send result back as function_call_output
+          openAiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id,
+              output: JSON.stringify(result)
+            }
+          }));
+
+          // Trigger GPT to respond using this result
+          openAiWs.send(JSON.stringify({ type: "response.create" }));
+        }
+
+
         if (name === "getAvailableSlots") {
           console.log("📞 AI requested available slots:", args);
 
           // Fake available slots
-          const result = {
-            date: args.date,
-            service: args.service,
-            slots: []
-          };
+          const result = await getAvailability(
+            args.employeeId,
+            args.serviceId, 
+            args.date
+            )
 
           // Send result back as function_call_output
           openAiWs.send(JSON.stringify({
@@ -178,6 +235,7 @@ You are a friendly AI call assistant for an barbershop, you only speak english b
 - Ask questions naturally, one at a time.
 - Keep your tone friendly, conversational, and professional.
 - Never agree to speak any language other than English
+- ALLWAYS get confirmation on user info, read it back to the user and if he corrects his info, you MUST read it back to the user and get confirmation.
             `
           }
         }));
@@ -193,9 +251,10 @@ You are a friendly AI call assistant for an barbershop, you only speak english b
             }
           }));
       }
-
-      // Forward all other messages to OpenAI
-      openAiWs.send(msg.toString());
+      else {
+    // Forward all *other* messages to OpenAI
+    openAiWs.send(msg.toString());
+  }
     });
 
     // -----------------------------
